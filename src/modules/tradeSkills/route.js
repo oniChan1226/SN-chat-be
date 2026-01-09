@@ -2,6 +2,7 @@ import express from "express";
 import { createTradeRequest, getSentTradeRequests } from "./controller.js";
 import { getReceivedTradeRequests } from "./controller.js";
 import { updateTradeStatus } from "./controller.js";
+import { submitReview, getUserReviews, getTradeReviews } from "./controller.js";
 import { verifyJwt } from "../../middlewares/auth.middleware.js";
 
 const router = express.Router();
@@ -37,5 +38,23 @@ router.get("/received", getReceivedTradeRequests);
  * @desc Accept / Reject / Complete a trade request
  */
 router.patch("/:id/status", updateTradeStatus);
+
+/**
+ * @route POST /api/trades/:tradeId/review
+ * @desc Submit a review for a completed trade
+ */
+router.post("/:tradeId/review", submitReview);
+
+/**
+ * @route GET /api/trades/reviews/user/:userId
+ * @desc Get all reviews for a specific user
+ */
+router.get("/reviews/user/:userId", getUserReviews);
+
+/**
+ * @route GET /api/trades/:tradeId/reviews
+ * @desc Get reviews for a specific trade
+ */
+router.get("/:tradeId/reviews", getTradeReviews);
 
 export default router;

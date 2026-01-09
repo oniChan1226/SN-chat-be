@@ -7,6 +7,10 @@ import {
     analyzeProfile,
     findTeachersForSkill,
     getMutualMatches,
+    getTopMatches,
+    getTopRequiredSkills,
+    getTopOfferedSkills,
+    getUserAnalytics,
     getCustomSkillSimilarity,
     getCustomLearningPath,
     getCustomAdvancedMatches,
@@ -36,6 +40,18 @@ router.get("/find-teachers/:skillName", findTeachersForSkill);
 
 // Get mutual skill matches (bidirectional)
 router.get("/mutual-matches", getMutualMatches);
+
+// Get top 3 bi-directional skill matches
+router.get("/top-matches", getTopMatches);
+
+// Get top 3 most required skills across the application
+router.get("/analytics/top-required-skills", getTopRequiredSkills);
+
+// Get top 3 most offered skills across the application
+router.get("/analytics/top-offered-skills", getTopOfferedSkills);
+
+// Get comprehensive analytics for a user
+router.get("/analytics/user/:userId", getUserAnalytics);
 
 // ==========================================
 // Custom AI Routes (Neural Network Based)

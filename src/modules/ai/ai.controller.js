@@ -431,6 +431,302 @@ export const getMutualMatches = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Get top 3 AI-powered bi-directional skill matches
+ * GET /api/v1/ai/top-matches
+ */
+export const getTopMatches = asyncHandler(async (req, res) => {
+    const { user } = req;
+
+    // Get current user's profile
+    const currentUserProfile = await SkillProfileModel.findOne({ userId: user._id })
+        .populate("offeredSkills")
+        .populate("requiredSkills");
+
+    if (!currentUserProfile) {
+        throw new ApiError(404, "Your skill profile not found");
+    }
+
+    // Find all other user profiles
+    const allProfiles = await SkillProfileModel.find({
+        userId: { $ne: user._id }
+    })
+        .populate("offeredSkills")
+        .populate("requiredSkills")
+        .populate("userId", "name profession profileImage address bio rating totalExchanges metrics");
+
+    const matches = [];
+
+    for (const profile of allProfiles) {
+        const match = await AIService.calculateBidirectionalMatch(
+            {
+                offered: currentUserProfile.offeredSkills,
+                required: currentUserProfile.requiredSkills
+            },
+            {
+                offered: profile.offeredSkills,
+                required: profile.requiredSkills
+            }
+        );
+
+        // Include all matches with any score > 0, not just mutual ones
+        if (match.overallScore > 0) {
+            matches.push({
+                user: {
+                    id: profile.userId._id,
+                    name: profile.userId.name,
+                    profession: profile.userId.profession,
+                    profileImage: profile.userId.profileImage,
+                    address: profile.userId.address,
+                    bio: profile.userId.bio
+                },
+                match: {
+                    ...match,
+                    // Add individual direction scores
+                    offeredToRequiredScore: match.canTeach.length > 0 ? 
+                        match.canTeach.reduce((sum, m) => sum + m.matchScore, 0) / match.canTeach.length : 0,
+                    requiredToOfferedScore: match.canLearn.length > 0 ? 
+                        match.canLearn.reduce((sum, m) => sum + m.matchScore, 0) / match.canLearn.length : 0
+                },
+                stats: {
+                    rating: profile.rating,
+                    totalExchanges: profile.totalExchanges,
+                    pendingRequests: profile.metrics.pendingRequests,
+                    acceptedRequests: profile.metrics.acceptedRequests,
+                    completedRequests: profile.metrics.completedRequests,
+                    successRate: profile.metrics.acceptedRequests > 0 ? 
+                        (profile.metrics.completedRequests / profile.metrics.acceptedRequests * 100).toFixed(1) : 0
+                }
+            });
+        }
+    }
+
+    // Sort by overall match score (descending)
+    matches.sort((a, b) => b.match.overallScore - a.match.overallScore);
+    
+    // Return top 3 matches
+    const topMatches = matches.slice(0, 3);
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                matches: topMatches,
+                totalPotentialMatches: matches.length
+            },
+            "Top skill matches found successfully"
+        )
+    );
+});
+
+/**
+ * Get top 3 most required skills across all users in the application
+ * GET /api/v1/ai/analytics/top-required-skills
+ */
+export const getTopRequiredSkills = asyncHandler(async (req, res) => {
+    // Aggregate all required skills and count their frequency
+    const skillStats = await SkillProfileModel.aggregate([
+        {
+            $unwind: "$requiredSkills"
+        },
+        {
+            $group: {
+                _id: "$requiredSkills",
+                count: { $sum: 1 }
+            }
+        },
+        {
+            $lookup: {
+                from: "skills",
+                localField: "_id",
+                foreignField: "_id",
+                as: "skillDetails"
+            }
+        },
+        {
+            $unwind: "$skillDetails"
+        },
+        {
+            $project: {
+                skillId: "$_id",
+                name: "$skillDetails.name",
+                proficiencyLevel: "$skillDetails.proficiencyLevel",
+                learningPriority: "$skillDetails.learningPriority",
+                categories: "$skillDetails.categories",
+                description: "$skillDetails.description",
+                count: 1,
+                totalRequests: "$skillDetails.metrics.totalRequests",
+                acceptedRequests: "$skillDetails.metrics.acceptedRequests",
+                completedRequests: "$skillDetails.metrics.completedRequests"
+            }
+        },
+        {
+            $sort: { count: -1 }
+        },
+        {
+            $limit: 3
+        }
+    ]);
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                topRequiredSkills: skillStats,
+                totalSkillsAnalyzed: skillStats.length
+            },
+            "Top required skills retrieved successfully"
+        )
+    );
+});
+
+/**
+ * Get top 3 most offered skills across all users in the application
+ * GET /api/v1/ai/analytics/top-offered-skills
+ */
+export const getTopOfferedSkills = asyncHandler(async (req, res) => {
+    // Aggregate all offered skills and count their frequency
+    const skillStats = await SkillProfileModel.aggregate([
+        {
+            $unwind: "$offeredSkills"
+        },
+        {
+            $group: {
+                _id: "$offeredSkills",
+                count: { $sum: 1 }
+            }
+        },
+        {
+            $lookup: {
+                from: "skills",
+                localField: "_id",
+                foreignField: "_id",
+                as: "skillDetails"
+            }
+        },
+        {
+            $unwind: "$skillDetails"
+        },
+        {
+            $project: {
+                skillId: "$_id",
+                name: "$skillDetails.name",
+                proficiencyLevel: "$skillDetails.proficiencyLevel",
+                learningPriority: "$skillDetails.learningPriority",
+                categories: "$skillDetails.categories",
+                description: "$skillDetails.description",
+                count: 1,
+                totalRequests: "$skillDetails.metrics.totalRequests",
+                acceptedRequests: "$skillDetails.metrics.acceptedRequests",
+                completedRequests: "$skillDetails.metrics.completedRequests"
+            }
+        },
+        {
+            $sort: { count: -1 }
+        },
+        {
+            $limit: 3
+        }
+    ]);
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                topOfferedSkills: skillStats,
+                totalSkillsAnalyzed: skillStats.length
+            },
+            "Top offered skills retrieved successfully"
+        )
+    );
+});
+
+/**
+ * Get comprehensive analytics for a specific user
+ * GET /api/v1/ai/analytics/user/:userId
+ */
+export const getUserAnalytics = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    const { user } = req;
+
+    // Check if requesting own analytics or if admin (for now, allow own analytics only)
+    if (userId !== user._id.toString()) {
+        throw new ApiError(403, "You can only view your own analytics");
+    }
+
+    // Get user's skill profile with populated skills
+    const skillProfile = await SkillProfileModel.findOne({ userId })
+        .populate("offeredSkills")
+        .populate("requiredSkills");
+
+    if (!skillProfile) {
+        throw new ApiError(404, "Skill profile not found");
+    }
+
+    // Get user's basic info
+    const userInfo = await User.findById(userId).select("name profession address bio");
+
+    // Calculate additional analytics
+    const totalOfferedSkills = skillProfile.offeredSkills.length;
+    const totalRequiredSkills = skillProfile.requiredSkills.length;
+
+    const analytics = {
+        user: {
+            id: userInfo._id,
+            name: userInfo.name,
+            profession: userInfo.profession,
+            address: userInfo.address,
+            bio: userInfo.bio
+        },
+        skills: {
+            offered: {
+                count: totalOfferedSkills,
+                skills: skillProfile.offeredSkills.map(skill => ({
+                    id: skill._id,
+                    name: skill.name,
+                    proficiencyLevel: skill.proficiencyLevel,
+                    categories: skill.categories
+                }))
+            },
+            required: {
+                count: totalRequiredSkills,
+                skills: skillProfile.requiredSkills.map(skill => ({
+                    id: skill._id,
+                    name: skill.name,
+                    learningPriority: skill.learningPriority,
+                    categories: skill.categories
+                }))
+            }
+        },
+        tradingMetrics: {
+            rating: skillProfile.rating,
+            totalExchanges: skillProfile.totalExchanges,
+            pendingRequests: skillProfile.metrics.pendingRequests,
+            acceptedRequests: skillProfile.metrics.acceptedRequests,
+            completedRequests: skillProfile.metrics.completedRequests,
+            rejectedRequests: skillProfile.metrics.rejectedRequests,
+            successRate: skillProfile.metrics.acceptedRequests > 0 ?
+                ((skillProfile.metrics.completedRequests / skillProfile.metrics.acceptedRequests) * 100).toFixed(1) : 0,
+            responseRate: (skillProfile.metrics.acceptedRequests + skillProfile.metrics.rejectedRequests) > 0 ?
+                (((skillProfile.metrics.acceptedRequests + skillProfile.metrics.rejectedRequests) / (skillProfile.metrics.acceptedRequests + skillProfile.metrics.rejectedRequests + skillProfile.metrics.pendingRequests)) * 100).toFixed(1) : 0
+        },
+        activitySummary: {
+            totalSkillsListed: totalOfferedSkills + totalRequiredSkills,
+            activeRequests: skillProfile.metrics.pendingRequests,
+            completedTrades: skillProfile.metrics.completedRequests,
+            averageRating: skillProfile.rating.toFixed(1)
+        }
+    };
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            analytics,
+            "User analytics retrieved successfully"
+        )
+    );
+});
+
+/**
  * Custom AI: Calculate skill similarity using neural network
  * POST /api/v1/ai/custom/skill-similarity
  */

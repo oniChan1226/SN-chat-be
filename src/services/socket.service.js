@@ -216,6 +216,8 @@ export const NOTIFICATION_EVENTS = {
     TRADE_REQUEST_REJECTED: "notification:trade_request_rejected",
     TRADE_REQUEST_COMPLETED: "notification:trade_request_completed",
     TRADE_MARKED_COMPLETE: "notification:trade_marked_complete",
+    // Review Events
+    REVIEW_RECEIVED: "notification:review_received",
 };
 
 export default {
